@@ -1,0 +1,220 @@
+// Name: Thivya Sri Sivakumar
+//Description: ESP8266 with EEPROM (AP & Wi-Fi Modes)
+
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <EEPROM.h>
+
+// Access Point (AP) credentials
+const char* ap_ssid = "nodemcu-server-thi";
+const char* ap_pass = "";
+
+// Initialize ESP8266WebServer on port 80
+ESP8266WebServer server(80);
+
+String ssid, pass, devid, outputStatus, content;
+
+void createWebServer();
+void writeData();
+void readData();
+void connectToWiFi();
+void startAPMode();
+void updateLED();
+
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+
+  // Initialize the LED pin as an output
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(D0, OUTPUT);
+
+  // Initialize EEPROM
+  EEPROM.begin(512);
+  readData(); // Ensure data is read from EEPROM
+
+  // Attempt to connect to WiFi if credentials are available, otherwise start AP mode
+  if (ssid.length() > 0 && pass.length() > 0) {
+    Serial.println("Attempting to connect to WiFi...");
+    connectToWiFi();
+  } else {
+    startAPMode();
+  }
+
+  // Create the web server for configuration
+  createWebServer();
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+}
+
+void startAPMode() {
+  Serial.println("AP Mode. Please connect to http://192.168.4.1 to configure");
+
+  // Configure the ESP8266 as an access point
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ap_ssid, ap_pass);
+
+  Serial.print("AP IP address: ");
+  Serial.println(WiFi.softAPIP());
+}
+
+void createWebServer() {
+  // Handle root URL
+  server.on("/", []() {
+    content = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'><style>";
+    content += "body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; text-align: center; }";
+    content += ".container { width: 100%; max-width: 600px; margin: 50px auto; padding: 20px; background: #fff; border-radius: 10px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); }";
+    content += "h1 { color: #333; }";
+    content += "h2 { color: #666; }";
+    content += "table { width: 100%; margin: 20px 0; }";
+    content += "th, td { padding: 10px; text-align: left; }";
+    content += "input[type=text], input[type=password], select { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ccc; border-radius: 5px; background-color: #f2f2f2; }"; // Light gray background color
+    content += ".button { background-color: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }";
+    content += ".button:hover { background-color: #45a049; }";
+    content += ".title { color: blue; font-size: 24px; }";
+    content += ".italic-underlined { font-style: italic; text-decoration: underline; }"; 
+    content += "</style></head><body>";
+    content += "<div class='container'>";
+    content += "<h1>Welcome to NodeMCU Server</h1>";
+    content += "<div class='title'>WiFi Manager</div>"; 
+    content += "<h3 class='italic-underlined'>Current Settings</h3>";
+    content += "<table><tr><th>Device ID</th><td>" + devid + "</td></tr>";
+    content += "<tr><th>WiFi SSID</th><td>" + ssid + "</td></tr>";
+    content += "<tr><th>WiFi Password</th><td>" + pass + "</td></tr>";
+    content += "<tr><th>Output Status</th><td>" + outputStatus + "</td></tr></table>";
+    content += "<form method='get' action='setting'>";
+    content += "<h3 class='italic-underlined'>New WiFi Settings</h3>";
+    content += "<table><tr><td>WiFi SSID:</td><td><input type='text' name='ssid' length=32></td></tr>";
+    content += "<tr><td>WiFi Password:</td><td><input type='password' name='password' length=32></td></tr>";
+    content += "<tr><td>Device ID:</td><td><input type='text' name='deviceid' length=32></td></tr>";
+    content += "<tr><td>Output Status:</td><td><select name='outputstatus'><option value='ON'>ON</option><option value='OFF'>OFF</option></select></td></tr>";
+    content += "<tr><td colspan='2' style='text-align:center;'><input class='button' type='submit' value='Save'></td></tr></table>";
+    content += "</form></div></body></html>";
+    server.send(200, "text/html", content);
+  });
+
+  server.on("/setting", []() {
+    // Get new settings from request parameters
+    ssid = server.arg("ssid");
+    pass = server.arg("password");
+    devid = server.arg("deviceid");
+    outputStatus = server.arg("outputstatus");
+    writeData(); // Save new settings to EEPROM
+    server.sendHeader("Location", "/", true);
+    server.send(200, "text/plain", "Settings Saved. Restarting ESP8266...");
+    Serial.println("Settings Saved. Restarting ESP8266...");
+    delay(1000);
+    ESP.restart();  // Restart the ESP8266 to apply new settings
+  });
+}
+
+void writeData() {
+  // Write new settings to EEPROM
+  Serial.println("Writing to EEPROM...");
+  for (int i = 0; i < 20; i++) {
+    EEPROM.write(i, ssid[i]);
+  }
+  for (int i = 20; i < 40; i++) {
+    EEPROM.write(i, pass[i - 20]);
+  }
+  for (int i = 40; i < 60; i++) {
+    EEPROM.write(i, devid[i - 40]);
+  }
+  for (int i = 60; i < 64; i++) {
+    EEPROM.write(i, outputStatus[i - 60]);
+  }
+  EEPROM.commit();
+  Serial.println("Write successful");
+}
+
+void readData() { 
+  // Read settings from EEPROM
+  String essid, epass, edevid, eoutputStatus;
+
+  Serial.println("Reading from EEPROM...");
+  for (int i = 0; i < 20; i++) {
+    char c = char(EEPROM.read(i));
+    if (c != 0 && c != 255) essid += c;
+  }
+  for (int i= 20; i < 40; i++) {
+    char c = char(EEPROM.read(i));
+    if (c != 0 && c != 255) epass += c;
+  }
+  for (int i = 40; i < 60; i++) {
+    char c = char(EEPROM.read(i));
+    if (c != 0 && c != 255) edevid += c;
+  }
+  for (int i = 60; i < 64; i++) {
+    char c = char(EEPROM.read(i));
+    if (c != 0 && c != 255) eoutputStatus += c;
+  }
+
+  Serial.println("WiFi SSID from EEPROM: " + essid);
+  Serial.println("WiFi password from EEPROM: " + epass);
+  Serial.println("Device ID from EEPROM: " + edevid);
+  Serial.println("Output status from EEPROM: " + eoutputStatus);
+
+  // Validate data and set defaults if necessary
+  if (essid.length() == 0) {
+    ssid = "defaultSSID";
+    Serial.println("No valid SSID found, using default: " + ssid);
+  } else {
+    ssid = essid;
+  }
+
+  if (epass.length() == 0) {
+    pass = "defaultPass";
+    Serial.println("No valid Password found, using default: " + pass);
+  } else {
+    pass = epass;
+  }
+
+  if (edevid.length() == 0) {
+    devid = "defaultDeviceID";
+    Serial.println("No valid Device ID found, using default: " + devid);
+  } else {
+    devid = edevid;
+  }
+
+  if (eoutputStatus == "ON" || eoutputStatus == "OFF") {
+    outputStatus = eoutputStatus;
+  } else {
+    outputStatus = "OFF";
+    Serial.println("No valid Output Status found, using default: " + outputStatus);
+  }
+}
+
+void connectToWiFi() {
+  // Attempt to connect to WiFi
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 10) {
+    delay(1000);
+    Serial.print(".");
+    attempts++;
+  }
+  // If connected successfully, update LED status
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi connected successfully.");
+    Serial.print("Local IP address: ");
+    Serial.println(WiFi.localIP());
+    updateLED();
+  } else {
+    // If failed to connect, start AP mode
+    Serial.println("\nFailed to connect to WiFi. Starting AP mode.");
+    startAPMode();
+  }
+}
+
+void updateLED() {
+  // Update LED based on output status
+  if (outputStatus == "ON") {
+    digitalWrite(D0, HIGH); // Turn on external LED
+  } else {
+    digitalWrite(D0, LOW); // Turn off external LED
+  }
+}
